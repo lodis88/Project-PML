@@ -1,0 +1,124 @@
+Marcos Alexandre Lodis, Date 19/11/2014,Brazil.
+##setwd("C:\\Users\\Marcos\\Desktop\\PML_OK")
+
+- **Pratical Machine Learning**
+
+The objective of this assignment is to accurately predict, using a machine learning algorithm, a set of 20 human activities.
+
+
+- **Cleaning and preparing training data**
+
+Disclaimer: in this document, in every code snippet, the code is only shown, but never run. Results will not be shown directly, but these are all the actual codes I used.
+This code loaded the datasets:
+
+```{r}
+train <- read.csv("pml-training.csv", header=T)
+test <- read.csv("pml-testing.csv", header=T)
+```
+
+The training data is quite large, and contains more than 150 variables. I decided to leave out variables related to time and individual identifiers. I also noted that there are several NAs in all the data, so every variable containing any NAs was also droped out. The following code did this to me:
+
+
+```{r}
+commonnames <- intersect(names(train), names(test))
+namesout <- c()
+for ( name in commonnames )
+  if ( sum(is.na(train[, name])) > 0 || sum(is.na(test[, name])) > 0)
+    namesout <- c(namesout, name)
+commonnames <- setdiff(commonnames, namesout)
+train <- train[, c(commonnames, "classe")]
+test <- test[, c(commonnames, "problem_id")]
+train <- train[, setdiff(names(train), c("X", "user_name", "raw_timestamp_part_1",
+                                         "raw_timestamp_part_2", "cvtd_timestamp",
+                                         "new_window", "num_window"))]
+test <- test[, setdiff(names(test), c("X", "user_name", "raw_timestamp_part_1",
+                                      "raw_timestamp_part_2", "cvtd_timestamp",
+                                      "new_window", "num_window"))]
+rm(list=c("commonnames", "name", "namesout"))
+
+```
+
+The procedure above reduced my dataset to only 53 variables. I also did a further reduction on the number of variables of the training dataset by taking out those variables (all of them except for classe are numeric) which don't show much variation. My method was to measure the ratio of the standard deviation divided by the range (max - min). Variables with this measure lower than 0.15 (this value is arbitrary) were droped out. It was done to reduce the size of the problem.
+
+
+```{r}
+leaveout <- c()
+for (name in names(train[, -53]) ) {
+  r <- max(train[, name]) - min(train[, name])
+  s <- sd(train[, name])
+  if ( s/r < 0.15 )
+    leaveout <- c(leaveout, which(names(train) == name))
+}
+rm(list=c("name", "r", "s"))
+```
+
+
+And it took 22 variables out, leaving me with only 30 numeric variables to cope with. Now, the fun part begins.
+
+- ** The Machine Learning Algorithm**
+
+The problem training data was divided into training and testing datasets 30 times, each time leaving about 30% of the data for training and 70% for testing. On each time, I applied the Random Forest algorithm on the training set and generated the confusion matrix using the calculated model for the training and testing sets. On each time, the resulting model and the confusion matrices were saved on the hard disk so they could be available for further use. The entire process was run in about 8 hours on my computer.
+
+The code below did the calculations:
+
+
+```{r}
+library(caret)
+tries <- 30
+models <- confusionTrain <- confusionTest <- list()
+for ( model in 1:tries ) {
+  name <- paste0("model", model)
+  set.seed(model)
+  inTrain  <- createDataPartition(train$classe, p=0.30, list=FALSE)
+  myTrain  <- train[inTrain,  ]
+  myTest   <- train[-inTrain, ]
+  modelFit <- train(classe ~ ., method="rf", data=myTrain[, -leaveout],
+                    preProcess="range")
+  models[[name]] <- modelFit
+  confusionTrain[[name]] <- confusionMatrix(myTrain$classe, predict(modelFit, myTrain))
+  confusionTest[[name]]  <- confusionMatrix(myTest$classe,  predict(modelFit, myTest))
+  save(models,         file="models.RData")
+  save(confusionTrain, file="confusionTrain.RData")
+  save(confusionTest,  file="confusionTest.RData")
+}
+rm(list=c("tries", "model", "name", "modelFit"))
+
+```
+
+
+- **Results and Choice of Model**
+
+I decided to look at the accuracy of the 30 calculated models to make my choice. Accuracy is simply the measure of how much the model calculated the right answer - in this case, for the classe variable.
+In R, if m is a confusion matrix, its accuracy can be accessed by the m$overall["Accuracy"] command. The accuracy for all the 30 training sets was very close to 100%, so I decided to use the model with highest accuracy for the testing set - that is, the model with the least out of sample error. The following code made the choice:
+
+
+
+```{r,,warning=FALSE}
+best <- 0
+bestacc <- 0
+for ( i in 1:30 ) {
+  model <- paste0("model", i)
+  acc <- confusionTest[[model]]$overall["Accuracy"]
+  if ( acc > bestacc ) {
+    bestacc <- acc
+    best <- model
+  }
+}
+rm(list=c(i, model))
+print(paste(best, bestacc))
+
+```
+
+Model number 23 was chosen, with its testing set accuracy being 98.449%. The original test set of the problem has 20 instances to be "guessed", so it means that I have a resonable chance to make at least 18 right answers out of 20:
+
+```{r}
+pbinom(17, 20, 0.98449, lower.tail=FALSE)
+```
+
+The actual prediction is made by the following command:
+
+```{r}
+pred <- as.character(predict(models[[best]], test))
+```
+
+It returned a vector of 20 characters, each with a possible answer to this assignment. And I did make 20 rights out of 20.
